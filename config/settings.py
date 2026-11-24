@@ -43,9 +43,13 @@ def env_list(name, default=""):
 # ---------------------------------------------------------------------------
 # Core
 # ---------------------------------------------------------------------------
-DEBUG = env_bool("DEBUG", False)
+DEBUG = os.getenv("DEBUG", "False").lower() == "true"
 
-SECRET_KEY = env_str("DJANGO_SECRET_KEY")
+
+print("DEBUG VALUE:", os.getenv("DEBUG"))
+print("SECRET KEY EXISTS:", bool(os.getenv("DJANGO_SECRET_KEY")))
+print("SECRET KEY LENGTH:", len(os.getenv("DJANGO_SECRET_KEY", "")))
+SECRET_KEY = os.getenv("DJANGO_SECRET_KEY")
 if not SECRET_KEY:
     if DEBUG:
         SECRET_KEY = "dev-insecure-only-for-local-development"
