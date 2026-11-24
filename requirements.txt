@@ -1,0 +1,18 @@
+# Core
+Django>=4.2,<5.0            # 4.2 LTS (supports Python 3.8-3.12)
+djangorestframework>=3.15,<3.16
+django-cors-headers>=4.4
+python-dotenv>=1.0
+dj-database-url>=2.2
+
+# External feeds
+requests>=2.32
+
+# Background jobs + cache
+celery>=5.4,<6
+redis>=5.0,<6
+# Needed only by Celery's filesystem broker (Redis-less local dev) on Windows.
+pywin32>=306; sys_platform == "win32"
+
+# PostgreSQL (production). Uncomment when DATABASE_URL points at Postgres.
+# psycopg2-binary>=2.9
