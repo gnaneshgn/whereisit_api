@@ -46,9 +46,7 @@ def env_list(name, default=""):
 DEBUG = os.getenv("DEBUG", "False").lower() == "true"
 
 
-print("DEBUG VALUE:", os.getenv("DEBUG"))
-print("SECRET KEY EXISTS:", bool(os.getenv("DJANGO_SECRET_KEY")))
-print("SECRET KEY LENGTH:", len(os.getenv("DJANGO_SECRET_KEY", "")))
+
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY")
 if not SECRET_KEY:
     if DEBUG:
@@ -56,7 +54,10 @@ if not SECRET_KEY:
     else:
         raise ImproperlyConfigured("DJANGO_SECRET_KEY must be set when DEBUG=False")
 
-ALLOWED_HOSTS = env_list("ALLOWED_HOSTS", "localhost,127.0.0.1","whereisitapi-production.up.railway.app")
+ALLOWED_HOSTS = env_list(
+    "ALLOWED_HOSTS",
+    "localhost,127.0.0.1,whereisitapi-production.up.railway.app"
+)
 
 INSTALLED_APPS = [
     "django.contrib.admin",
