@@ -8,7 +8,8 @@ from apps.buses.services import feed_status_service, location_service
 from common.utilities import normalize_registration, utc_now
 
 LIST_FIELDS = (
-    "id", "vehicle_id", "registration_number", "trip_id", "route_id", "route_number", "destination",
+    "id", "vehicle_id", "registration_number", "trip_id", "route_id", "route_number", "route_name",
+    "start_point", "destination", "progress",
     "latitude", "longitude", "bearing", "speed", "gps_timestamp", "is_superseded", "last_synced_at",
     "trip_start_date",
 )
@@ -61,6 +62,9 @@ def search_buses(query: str, *, now=None) -> QuerySet:
     condition = Q(vehicle_id__icontains=text) | Q(route_id__icontains=text) | Q(route_number__iexact=text)
     if registration:
         condition |= Q(registration_number__icontains=registration)
+    if len(text) >= 3:
+        # Place names: "Simhachalam" finds buses running to / from / via that route name.
+        condition |= Q(route_name__icontains=text) | Q(destination__icontains=text)
     return (
         _base()
         .filter(is_superseded=False)

@@ -116,5 +116,9 @@ def patch_http(routes):
 })
 class FeedTestCase(TestCase):
     def setUp(self):
+        from apps.transit.services.trip_context import reset_feed_memo
+
         cache.clear()
+        reset_feed_memo()  # process-level GTFS memo must not leak between tests
         self.addCleanup(cache.clear)
+        self.addCleanup(reset_feed_memo)

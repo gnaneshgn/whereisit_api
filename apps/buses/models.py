@@ -33,9 +33,15 @@ class LiveBus(models.Model):
     trip_id = models.CharField(max_length=128, null=True, blank=True, db_index=True)
     route_id = models.CharField(max_length=160, null=True, blank=True, db_index=True)
     trip_start_date = models.DateField(null=True, blank=True)
-    # Public route number / destination come from GTFS (Phase 2). Null until mapped.
+    # Labels and progress resolved from the imported GTFS at sync time. Null when unknown.
     route_number = models.CharField(max_length=32, null=True, blank=True, db_index=True)
+    route_name = models.CharField(max_length=255, null=True, blank=True)
+    start_point = models.CharField(max_length=255, null=True, blank=True)
     destination = models.CharField(max_length=255, null=True, blank=True)
+    progress = models.JSONField(
+        null=True, blank=True,
+        help_text="Trip progress from apps.transit.services.progress_service (fresh GPS only)",
+    )
 
     latitude = models.FloatField(null=True, blank=True)
     longitude = models.FloatField(null=True, blank=True)

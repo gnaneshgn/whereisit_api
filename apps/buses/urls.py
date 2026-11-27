@@ -13,12 +13,6 @@ urlpatterns = [
     path("buses/search/", views.BusSearchView.as_view(), name="bus-search"),
     path("buses/nearby/", views.NearbyBusesView.as_view(), name="bus-nearby"),
     path("buses/<str:vehicle_id>/", views.BusDetailView.as_view(), name="bus-detail"),
-    # Live buses on a route: needs only the live feed.
-    path("routes/<str:route_id>/buses/", views.RouteBusesView.as_view(), name="route-buses"),
-    # Need GTFS static data (Phase 2). Explicit 501 until then.
-    path("routes/", views.NotAvailableView.as_view(), name="route-list"),
-    path("routes/search/", views.NotAvailableView.as_view(), name="route-search"),
-    path("routes/<str:route_id>/", views.NotAvailableView.as_view(), name="route-detail"),
-    path("routes/<str:route_id>/stops/", views.NotAvailableView.as_view(), name="route-stops"),
-    path("stops/nearby/", views.NotAvailableView.as_view(), name="stop-nearby"),
+    # Route, stop, trip and journey endpoints live in apps.transit.urls
+    # (they answer 501 not_available until GTFS is imported).
 ]

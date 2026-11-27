@@ -4,8 +4,8 @@ Django REST Framework backend that tracks APSRTC buses in real time using the
 GTFS-Realtime feeds published at `maps.reclaim.city`, and serves them to the
 VizagMove React Native app.
 
-**Status:** Phase 1 is complete, plus the bus search, nearby buses and route-buses
-endpoints the mobile app needs. GTFS static import and the route and stop APIs come in Phase 2.
+**Status:** Phases 1–2 are complete: live tracking, GTFS static import, stop-by-stop trip
+progress with ETAs, route and stop APIs, and source → destination journey planning on direct buses.
 
 ---
 
@@ -18,9 +18,14 @@ python -m venv .venv
 pip install -r requirements.txt
 copy .env.example .env              # then set DJANGO_SECRET_KEY, and REDIS_URL= (empty) if Redis isn't running
 python manage.py migrate
-python manage.py sync_live_feed     # one real sync (about 5 s, ~6,600 vehicles)
+python manage.py import_gtfs        # routes/stops/trips from data/apsrtc (~3.5 min, ~350 MB RAM)
+python manage.py sync_live_feed     # one real sync
 python manage.py runserver
 ```
+
+No `data/` folder (e.g. on a server)? `python manage.py import_gtfs --download` fetches
+`APSRTC_GTFS_URL` (21 MB zip) and imports it. Re-run either command whenever the feed is
+updated; the swap is atomic and running workers pick it up within 30 s.
 
 Open http://127.0.0.1:8000/api/buses/live/?bbox=17.60,83.00,17.95,83.45 to see live buses in Visakhapatnam.
 
@@ -63,7 +68,7 @@ Every external call is mocked, so the tests never touch the real APSRTC service.
 | Vehicle positions | `/apsrtc/rt/vehicle_positions.json` | GTFS-RT JSON, ~2.5 MB, ~6,600–6,900 vehicles, `FULL_DATASET`, refreshes ≈ every 30 s |
 | Trip updates | `/apsrtc/rt/trip_updates.json` | ~4.7 MB, ~5,400 trips; `vehicle.id` matches vehicle positions |
 | Status | `/apsrtc/rt/status.json` | `{network, feed_time, written, vehicles, on_trip, on_route, trip_updates}` |
-| Static GTFS | `/gtfs/apsrtc.zip` | Phase 2 |
+| Static GTFS | `/gtfs/apsrtc.zip` | Same publisher as the realtime feed; local copy in `data/apsrtc/` |
 
 Facts from the real data that shaped the design:
 
@@ -74,11 +79,75 @@ Facts from the real data that shaped the design:
   `is_superseded` and hidden from `/live/`.
 - **~18% of vehicles have no `trip`**, so `route_id` / `trip_id` are null for them.
 - **`routeId` is an internal slug** (`b011-rtc-complex-vsp-simhachalam`), *not* the
-  public route number. `route_number` and `destination` stay `null` until GTFS
-  mapping is added in Phase 2. They are never guessed.
+  public route number. `route_number` (the APSRTC route code, e.g. `A009`) and
+  `destination` come from the imported GTFS; without it they stay `null`.
 - **Some plates are partial or empty** (`39Z0142`, `""`). They are kept as-is or set to null, never "fixed".
 - **Some GPS timestamps are years in the future.** They are discarded (`gps_timestamp: null`, status `UNAVAILABLE`).
 - Timestamps are **strings** of epoch seconds. Speed is in **m/s** (also exposed as `speed_kmh`).
+
+---
+
+## GTFS static data: which dataset and why
+
+`data/` holds two GTFS feeds. Measured against the live feed (27 Nov 2026):
+
+| Folder | Publisher | Live `trip_id` match | Live `route_id` match | Notes |
+|---|---|---|---|---|
+| `data/apsrtc` | reclaim.city (same as the realtime feed) | **1625 / 1625** | **1625 / 1625** | 5,091 routes, 11,156 stops, 54,812 trips, shapes for 99% of trips, valid to Oct 2027. Already includes the 462 Neo2308 routes |
+| `data/gtfs` | Neo2308 community feed | 0 / 1625 | 0 / 1625 | Numeric ids, no names, expired 30 Sep 2026. **Not used** |
+
+Other facts that shaped the design:
+
+- Trip-update stop ids are all in `stops.txt` (1574/1574), and their `stop_sequence` matches `stop_times.txt` 99.7% of the time.
+- Shapes are sparse, with a median of **315 m between points**, so positions are projected onto segments, never snapped to vertices.
+- Running time varies by up to 25 min between trips on the same stop list, so **each trip keeps its own timings**.
+- Times past `24:00:00` are used for trips that run past midnight (23k rows).
+- **`trip_headsign` is unreliable:** about 24% of headsigns name neither end of the trip (an Airport-bound AM10 trip is signed "Tagarapuvalasa"). `destination` is therefore the trip's **last stop**, and the raw headsign is only informational.
+- Route codes (`A009`, `9092`, …) are the only route numbers in the data.
+
+---
+
+## Trip tracking algorithm (`apps/transit/services/`)
+
+**Import (`gtfs_import.py`, run once per feed):**
+
+1. Trips are grouped into **patterns**: route + shape + exact ordered stop list. 54,812 trips collapse into 12,093 patterns.
+2. Each pattern's stops are placed on its road shape as a **distance along the road**. Each stop is searched only *ahead* of the previous one, so loops and out-and-back roads come out right.
+3. If a pattern has no shape, or its shape doesn't fit the stops (median offset over 300 m), the path is the line joining the stops and the pattern is flagged `path_approximate` (476 patterns).
+4. Missing stop times are interpolated by distance between timed neighbours, never extrapolated.
+
+**Live, at every sync (`progress_service.py`, about 2 s for ~1,600 buses):**
+
+1. The live record's `trip_id` gives the exact stops and road. **Direction is never guessed.**
+2. The GPS point is projected onto the road. Every place the road passes within 150 m is a candidate. The candidate with the lowest score is chosen:
+   - distance from the road
+   - plus a penalty when the bus heading disagrees with the road direction
+   - plus a penalty for moving backwards since the last fix
+   - plus a penalty for falling outside the window implied by the realtime trip update
+3. Comparing the bus's distance along the road with the stops' distances gives the **last passed, current (within 60 m) and next stop**, the stops remaining and the % complete.
+4. If no part of the road is within 150 m, the status is **`off_route`** and no stop is reported.
+5. Progress is shown only while the GPS is LIVE or RECENT (≤ 5 min).
+
+**ETA for each stop ahead:**
+- **Realtime:** the trip update's prediction, then the trip's own scheduled gaps added for later stops (delay propagation).
+- **Schedule:** otherwise, GPS time + (scheduled time at the stop − scheduled time at the bus's position). This assumes the bus keeps its current delay.
+- If there's neither, the ETA is null. Every ETA carries `eta_source`.
+
+**Measured on the real feed:**
+- Next stop agrees with APSRTC's independent trip-update prediction: **95.2% exactly, 99.5% within one stop** (1,215 buses).
+- GPS-to-road distance: median 7 m, p90 28 m.
+- About 8% of buses are `off_route`, with a median of 850 m from their trip's road. They are on detours, mis-assigned to a trip, or heading to the depot.
+
+**Journeys (`journey_service.py`):**
+1. Each end becomes candidate stops:
+   - an explicit stop, plus its twin across the road within 150 m, or
+   - every stop within 500 m of a coordinate.
+2. A pattern serves the trip when a boarding stop comes **before** an alighting stop in its stop list.
+3. For each matching pattern you get:
+   - the stops in between, the distance and the scheduled ride time
+   - **live buses that haven't reached the boarding stop yet**, with ETAs at both ends
+   - the next scheduled departures (labelled `source: "schedule"`)
+4. Only direct buses are planned; journeys that need a change are not supported yet.
 
 ---
 
@@ -101,6 +170,17 @@ backend/
     views.py         thin DRF views
     tasks.py         Celery tasks (thin wrappers)
     management/commands/sync_live_feed.py
+  apps/transit/      GTFS static + trip progress + journeys
+    models.py        GtfsFeed, Stop, Route, Shape, Pattern, PatternStop, Trip
+    services/
+      gtfs_import.py       parse, patterns, place stops on shapes, atomic replace, --download
+      geometry.py          encoded polylines, segment projection, slicing (pure Python)
+      trip_context.py      per-trip stops/path/timings, memoised per feed
+      progress_service.py  where is the bus on its trip + ETAs
+      live_bridge.py       called by the sync: labels + progress per vehicle
+      timeline_service.py  stop timeline for one bus
+      journey_service.py   source -> destination, stop arrivals
+    management/commands/import_gtfs.py
 ```
 
 ### Sync pipeline
@@ -151,21 +231,71 @@ Feed-level `feed_status`:
 
 ---
 
-## API (Phase 1)
+## API
 
 All responses are JSON. Datetimes are UTC (`...Z`). Unknown values are `null`.
+
+**Buses (live feed + GTFS labels/progress)**
 
 | Method | Path | Description |
 |---|---|---|
 | GET | `/api/buses/live/` | One record per physical bus with a usable GPS fix (not `UNAVAILABLE`), freshest first |
 | GET | `/api/buses/` | Every vehicle in the feed, including `UNAVAILABLE` ones |
-| GET | `/api/buses/search/?q=` | Registration (spaces/case ignored), vehicle id, route id or route number; exact plate first |
+| GET | `/api/buses/search/?q=` | Registration (spaces and case ignored), vehicle id, route id, route code, or a place in the route name or destination (3+ characters). Exact plate first |
 | GET | `/api/buses/nearby/?latitude=&longitude=&radius=&limit=` | Buses with a usable fix within `radius` km (default 5, max 50), nearest first, with `distance_km` |
-| GET | `/api/buses/{vehicle_id}/` | Detail by upstream vehicle id **or** registration number (returns the newest record) |
-| GET | `/api/routes/{route_id}/buses/` | Live buses on an upstream route id (live feed only, no GTFS needed) |
-| GET | `/api/feed/status/` | Feed health, sync times, GPS status counts, upstream status, thresholds |
+| GET | `/api/buses/{vehicle_id}/` | Detail by vehicle id **or** registration. Adds `upcoming_stops` (with `distance_km`, `eta`) and `route` (every stop with `status`, plus `path`) |
+| GET | `/api/buses/{vehicle_id}/trip/?to_stop=&from_stop=` | Live trip timeline and `path_ahead` (the road still to travel). With `to_stop`, also `journey`: stops left, distance and ETA to the rider's stop |
+| GET | `/api/routes/{route_id}/buses/` | Live buses on a route (live feed only) |
+
+**Routes, stops, trips, journeys (need `import_gtfs`; answer `501 not_available` before it)**
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/routes/?q=&service_type=city\|intercity\|other&bbox=` | Routes in the service area, with `active_buses` |
+| GET | `/api/routes/search/?q=` | Route code (`A009`), route name, or any stop on the route (`Simhachalam`) |
+| GET | `/api/routes/{route_id}/?pattern_id=` | Route, its `patterns` (each direction or variant), and the chosen pattern's ordered `stops` and `path` |
+| GET | `/api/routes/{route_id}/stops/?pattern_id=` | Ordered stops (default: the busiest pattern) |
+| GET | `/api/stops/nearby/?latitude=&longitude=&radius=1&limit=20` | Nearest stops (radius in km, max 5), each with the `routes` serving it |
+| GET | `/api/stops/search/?q=` | Stop names, exact and prefix matches first |
+| GET | `/api/stops/{stop_id}/` | Stop and its routes |
+| GET | `/api/stops/{stop_id}/arrivals/` | Live buses heading to the stop: `stops_away`, `distance_to_board_km`, `eta_at_board` |
+| GET | `/api/journeys/?from_stop=&to_stop=` (or `from_lat`/`from_lon`/`to_lat`/`to_lon`, `include_path`) | Direct buses from source to destination (see below) |
+| GET | `/api/trips/{trip_id}/` | Scheduled stop times (service-day `HH:MM`) and path |
+
+**Feed**
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/feed/status/` | Feed health, sync times, GPS status counts, upstream status, `gtfs` block, thresholds |
 | GET | `/api/health/` | Liveness probe |
-| GET | `/api/routes/`, `/api/routes/search/`, `/api/routes/{id}/`, `/api/routes/{id}/stops/`, `/api/stops/nearby/` | **501 `not_available`** until GTFS import (Phase 2). The mobile app treats this as "not available yet", not as an error |
+
+Bus fields from GTFS (all `null` when unknown):
+
+| Field | Meaning |
+|---|---|
+| `route_number`, `route_name` | APSRTC route code and name |
+| `start_point`, `destination` | First and last stop of the bus's trip |
+| `last_stop`, `current_stop`, `next_stop` | `{stop_id, stop_name, stop_sequence}`. `next_stop` adds `distance_m`, `expected_arrival` and `eta_source`. `current_stop` is set only when the bus is within 60 m |
+| `current_location` | `"At X"`, or `"Between X and Y"` |
+| `trip_progress` | `{status: in_transit\|at_stop\|not_started\|completed\|off_route, progress_pct, stops_remaining, distance_along_m, route_length_m, path_approximate, as_of}` |
+
+Journey option:
+
+```json
+{"route": {"route_number": "SK31", "route_name": "...", "service_type": "city", "bus_type": "City Ordinary"},
+ "towards": "Simhachalam Depot", "headsign": "...",
+ "board": {"stop_id": "232186", "stop_name": "Rtc Complex Vsp", "walk_m": 0},
+ "alight": {"stop_id": "13801", "stop_name": "Simhachalam", "walk_m": 0},
+ "stop_count": 8, "stops": [{"stop_name": "Rtc Complex Vsp", "distance_from_board_km": 0.0}, "..."],
+ "ride_distance_km": 16.34, "scheduled_ride_minutes": 37,
+ "live_buses": [{"registration_number": "AP39Z0475", "stops_away": 2, "distance_to_board_km": 1.8,
+                 "eta_at_board": "...Z", "eta_at_alight": "...Z", "eta_source": "realtime"}],
+ "next_scheduled": [{"trip_id": "...", "departs_at": "...Z", "arrives_at": "...Z", "source": "schedule"}],
+ "path_approximate": false}
+```
+
+Use `towards` (the bus's last stop) to tell riders which bus to board. `headsign` is the raw
+GTFS text and often names a different place.
 
 Query parameters for the list endpoints:
 
@@ -201,9 +331,8 @@ List response:
 }
 ```
 
-Bus detail also includes `trip_start_date`, `is_superseded`, `last_synced_at` and a
+Bus detail also includes `trip_start_date`, `is_superseded`, `last_synced_at` and the raw
 `trip_update` block (`next_stop.stop_id`, `stop_sequence`, `expected_arrival`, `delay_seconds`).
-Stop names arrive with GTFS in Phase 2.
 
 Errors:
 
@@ -228,6 +357,11 @@ The important ones:
 | `GPS_LIVE_MAX_AGE` / `GPS_RECENT_MAX_AGE` / `GPS_DELAYED_MAX_AGE` | 90 / 300 / 1800 | Freshness thresholds |
 | `SERVICE_AREA_BBOX` | empty | Restrict every API response to an area (e.g. Vizag) |
 | `APSRTC_*_TIMEOUT`, `APSRTC_MAX_RETRIES` | 5 / 30 / 2 | HTTP behaviour |
+| `GTFS_DIR` | `data/apsrtc` | Folder read by `import_gtfs` |
+| `APSRTC_GTFS_URL` | reclaim.city zip | Used by `import_gtfs --download` |
+| `TRANSIT_OFF_ROUTE_M` / `TRANSIT_AT_STOP_M` | 150 / 60 | Off-route distance and the "at the stop" radius |
+| `TRANSIT_JOURNEY_WALK_RADIUS_M` / `TRANSIT_SAME_STOP_RADIUS_M` | 500 / 150 | Journey stop matching |
+| `TRANSIT_SCHEDULE_WINDOW_MIN` / `TRANSIT_TRIP_UPDATE_MAX_AGE` | 180 / 900 | Scheduled departures window, and the maximum age of a realtime prediction |
 
 ---
 
@@ -236,7 +370,8 @@ The important ones:
 1. Set `DEBUG=False`, `DJANGO_SECRET_KEY`, `ALLOWED_HOSTS`, `CORS_ALLOWED_ORIGINS`.
 2. Provision PostgreSQL and Redis. Set `DATABASE_URL` and `REDIS_URL`, and add
    `psycopg2-binary` to `requirements.txt`.
-3. `python manage.py migrate && python manage.py collectstatic --noinput`
+3. `python manage.py migrate && python manage.py collectstatic --noinput && python manage.py import_gtfs --download`
+   (`data/` is not in git. The import needs about 350 MB of RAM and takes 3–4 min; repeat it when reclaim.city publishes a new feed.)
 4. Run these processes (systemd, supervisor or containers):
    - `gunicorn config.wsgi:application --workers 3 --bind 0.0.0.0:8000`
    - `celery -A config worker -l INFO --concurrency 2`
@@ -248,8 +383,10 @@ The important ones:
 
 ## Roadmap
 
-- **Phase 2:** `import_gtfs` command; BusRoute, BusStop, BusTrip, BusStopTime and BusShape models;
-  `route_number` and `destination` mapping (`bus_matching_service.lookup_route_metadata`);
-  route and stop APIs; trip details endpoint.
-- **Phase 3:** search (registration, vehicle id, route number), nearby buses and stops.
-- **Phase 4:** further caching optimization and PostgreSQL index tuning.
+- **Done:** GTFS import, route and stop APIs, trip progress and ETAs, journeys on direct buses, stop arrivals.
+- **Next:**
+  - journeys with one change
+  - places along the remaining route (OpenStreetMap POIs within ~400 m of `path_ahead`)
+  - crowd levels from opt-in rider pings
+  - a scheduled `import_gtfs --download`
+  - PostgreSQL index tuning

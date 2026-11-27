@@ -240,6 +240,28 @@ def gps_status_counts(now: datetime | None = None) -> dict:
     return {status: counts[status.lower()] or 0 for status in GpsStatus.values}
 
 
+def _gtfs_overview() -> dict | None:
+    """Imported GTFS static feed and how many live buses have trip progress."""
+    from apps.transit.services.trip_context import active_feed  # transit depends on buses
+
+    feed = active_feed()
+    if feed is None:
+        return None
+    return {
+        "version": feed.version or None,
+        "imported_at": iso_utc(feed.imported_at),
+        "service_start": feed.service_start.isoformat() if feed.service_start else None,
+        "service_end": feed.service_end.isoformat() if feed.service_end else None,
+        "routes": feed.route_count,
+        "stops": feed.stop_count,
+        "trips": feed.trip_count,
+        "patterns": feed.pattern_count,
+        "approximate_patterns": feed.approximate_pattern_count,
+        "buses_with_route": LiveBus.objects.filter(is_superseded=False).exclude(route_number=None).count(),
+        "buses_with_progress": LiveBus.objects.filter(is_superseded=False, progress__isnull=False).count(),
+    }
+
+
 def get_feed_overview(now: datetime | None = None) -> dict:
     now = now or utc_now()
     vp_state = get_source_state(FeedSource.VEHICLE_POSITIONS)
@@ -277,6 +299,7 @@ def get_feed_overview(now: datetime | None = None) -> dict:
             "total_trip_updates": tu_state.get("total_vehicles"),
         },
         "upstream": upstream,
+        "gtfs": _gtfs_overview(),
         "thresholds": {
             "gps_live_max_age_seconds": settings.GPS_FRESHNESS["LIVE_MAX_AGE"],
             "gps_recent_max_age_seconds": settings.GPS_FRESHNESS["RECENT_MAX_AGE"],

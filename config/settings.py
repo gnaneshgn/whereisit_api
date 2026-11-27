@@ -71,6 +71,7 @@ INSTALLED_APPS = [
     "corsheaders",
     # Local
     "apps.buses",
+    "apps.transit",
 ]
 
 MIDDLEWARE = [
@@ -242,6 +243,25 @@ def _parse_bbox(raw):
 
 
 SERVICE_AREA_BBOX = _parse_bbox(env_str("SERVICE_AREA_BBOX"))
+
+# ---------------------------------------------------------------------------
+# GTFS static + trip progress (apps.transit)
+# ---------------------------------------------------------------------------
+GTFS_DIR = Path(env_str("GTFS_DIR") or BASE_DIR / "data" / "apsrtc")
+TRANSIT = {
+    # GPS further than this from the trip's road = off route (no stop is reported)
+    "OFF_ROUTE_M": env_int("TRANSIT_OFF_ROUTE_M", 150),
+    # Within this distance (along the road) of a stop = "at" that stop
+    "AT_STOP_M": env_int("TRANSIT_AT_STOP_M", 60),
+    # Journey planning: walking radius around a coordinate, and the radius that
+    # groups an explicit stop with its twin across the road
+    "JOURNEY_WALK_RADIUS_M": env_int("TRANSIT_JOURNEY_WALK_RADIUS_M", 500),
+    "SAME_STOP_RADIUS_M": env_int("TRANSIT_SAME_STOP_RADIUS_M", 150),
+    # Scheduled departures shown when no live bus is coming
+    "SCHEDULE_WINDOW_MIN": env_int("TRANSIT_SCHEDULE_WINDOW_MIN", 180),
+    # Trip-update predictions older than this are ignored for ETAs
+    "TRIP_UPDATE_MAX_AGE": env_int("TRANSIT_TRIP_UPDATE_MAX_AGE", 900),
+}
 
 # ---------------------------------------------------------------------------
 # Celery

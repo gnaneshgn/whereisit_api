@@ -31,10 +31,26 @@ KEY_LOCK = "lock:sync:{source}"
 KEY_DATA_VERSION = "feed:vehicle_positions:version"
 
 UPSERT_FIELDS = [
-    "registration_number", "trip_id", "route_id", "trip_start_date", "route_number", "destination",
+    "registration_number", "trip_id", "route_id", "trip_start_date", "route_number", "route_name",
+    "start_point", "destination", "progress",
     "latitude", "longitude", "bearing", "speed", "gps_timestamp", "gps_status", "is_superseded",
     "last_synced_at", "raw_data",
 ]
+
+
+def _enrich(vehicles, now) -> dict:
+    """GTFS labels + trip progress per vehicle. Failures degrade to nulls, never break the sync."""
+    from apps.transit.services import live_bridge  # local import: transit depends on buses
+
+    try:
+        previous = dict(LiveBus.objects.filter(progress__isnull=False).values_list("vehicle_id", "progress"))
+        return live_bridge.enrich_vehicles(
+            vehicles, previous_progress=previous,
+            trip_updates=bus_matching_service.get_trip_updates_map(), now=now,
+        )
+    except Exception:
+        logger.exception("GTFS enrichment failed; storing vehicles without route data")
+        return {}
 
 
 @dataclass
@@ -82,9 +98,8 @@ def persist_snapshot(snapshot, now) -> int:
     """Upsert current vehicles and drop those no longer in the full dataset."""
     vehicles = snapshot.vehicles
     superseded = bus_matching_service.find_superseded_ids(vehicles)
-    route_names, headsigns = bus_matching_service.lookup_route_metadata(
-        {v.route_id for v in vehicles if v.route_id}, {v.trip_id for v in vehicles if v.trip_id}
-    )
+    enriched = _enrich(vehicles, now)
+    empty = {}
 
     rows = [
         LiveBus(
@@ -93,8 +108,11 @@ def persist_snapshot(snapshot, now) -> int:
             trip_id=v.trip_id,
             route_id=v.route_id,
             trip_start_date=v.trip_start_date,
-            route_number=route_names.get(v.route_id),
-            destination=headsigns.get(v.trip_id),
+            route_number=enriched.get(v.vehicle_id, empty).get("route_number"),
+            route_name=enriched.get(v.vehicle_id, empty).get("route_name"),
+            start_point=enriched.get(v.vehicle_id, empty).get("start_point"),
+            destination=enriched.get(v.vehicle_id, empty).get("destination"),
+            progress=enriched.get(v.vehicle_id, empty).get("progress"),
             latitude=v.latitude,
             longitude=v.longitude,
             bearing=v.bearing,
