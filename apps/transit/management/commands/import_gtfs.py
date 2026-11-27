@@ -23,8 +23,17 @@ class Command(BaseCommand):
             "--download", action="store_true",
             help=f"Download and import {settings.APSRTC['GTFS_URL']} (for servers without the data folder)",
         )
+        parser.add_argument(
+            "--if-missing", action="store_true",
+            help="Do nothing when a GTFS feed is already imported (safe to run on every deploy)",
+        )
 
     def handle(self, *args, **options):
+        if options["if_missing"]:
+            feed = trip_context.active_feed()
+            if feed is not None:
+                self.stdout.write(f"GTFS already imported ({feed}); skipping. Run without --if-missing to refresh.")
+                return
         try:
             if options["download"]:
                 url = settings.APSRTC["GTFS_URL"]
