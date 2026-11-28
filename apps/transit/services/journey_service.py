@@ -21,7 +21,7 @@ Transfers are not planned yet: no direct bus -> empty ``options``.
 """
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime, timedelta, time as dtime
 
 from django.conf import settings
@@ -111,9 +111,9 @@ def _scheduled_departures(pattern_ids, board_index, now, tz, exclude_trip_ids, p
     now_local = now.astimezone(tz)
     out = defaultdict(list)
     trips = Trip.objects.filter(pattern_id__in=pattern_ids).exclude(start_time_s=None).values_list(
-        "trip_id", "pattern_id", "start_time_s", "arrival_offsets"
+        "trip_id", "pattern_id", "start_time_s", "arrival_offsets", "bus_type"
     )
-    for trip_id, pid, start, offsets in trips:
+    for trip_id, pid, start, offsets, bus_type in trips:
         if trip_id in exclude_trip_ids:
             continue
         o_index = board_index[pid]
@@ -123,7 +123,7 @@ def _scheduled_departures(pattern_ids, board_index, now, tz, exclude_trip_ids, p
             midnight = datetime.combine(service_date, dtime(0, 0), tzinfo=tz)
             departs = midnight + timedelta(seconds=start + offsets[o_index])
             if now <= departs <= now + window:
-                out[pid].append((departs, trip_id, start, offsets, midnight))
+                out[pid].append((departs, trip_id, start, offsets, midnight, bus_type))
     result = {}
     for pid, items in out.items():
         items.sort()
@@ -166,6 +166,7 @@ def _approaching(bus, ctx, o_index, d_index, now, updates):
         "vehicle_id": bus.vehicle_id,
         "registration_number": bus.registration_number,
         "trip_id": bus.trip_id,
+        "bus_type": ctx.trip.bus_type or None,  # this bus's own trip_type
         "latitude": bus.latitude,
         "longitude": bus.longitude,
         "gps_status": feed_status_service.classify_gps_status(bus.gps_timestamp, now),
@@ -188,10 +189,14 @@ def plan(origins, destinations, *, include_path=False, limit=10):
     live = _live_on_patterns(patterns)
     updates = bus_matching_service.get_trip_updates_map()
 
-    # One representative trip per pattern for timings (the scheduled ride time).
+    # One representative trip per pattern for timings (the scheduled ride time), and the
+    # bus types actually running on each pattern (trip_type is per trip; a route can mix them).
     rep_trip = {}
+    pattern_types = defaultdict(Counter)
     for trip in Trip.objects.filter(pattern_id__in=list(pairs)).select_related("route", "pattern").order_by("trip_id"):
         rep_trip.setdefault(trip.pattern_id, trip)
+        if trip.bus_type:
+            pattern_types[trip.pattern_id][trip.bus_type] += 1
     live_trip_ids = {b.trip_id for buses in live.values() for b in buses}
     scheduled = _scheduled_departures(list(pairs), {pid: v[0] for pid, v in pairs.items()}, now, tz, live_trip_ids)
 
@@ -219,18 +224,24 @@ def plan(origins, destinations, *, include_path=False, limit=10):
         live_entries.sort(key=lambda e: (e["eta_at_board"] or "9999", e["distance_to_board_km"]))
 
         upcoming = []
-        for departs, trip_id, start, offsets, midnight in scheduled.get(pid, []):
+        for departs, trip_id, start, offsets, midnight, bus_type in scheduled.get(pid, []):
             arrive = offsets[d_index] if d_index < len(offsets) else None
             upcoming.append({
                 "trip_id": trip_id,
+                "bus_type": bus_type or None,
                 "departs_at": iso_utc(departs),
                 "arrives_at": iso_utc(midnight + timedelta(seconds=start + arrive)) if arrive is not None else None,
                 "source": "schedule",
             })
 
+        types = pattern_types.get(pid) or Counter()
+        route_ref = _route_ref(pattern.route)
+        # Most common type on THIS pattern (not the whole route); every type in bus_types
+        route_ref["bus_type"] = types.most_common(1)[0][0] if types else None
         option = {
             "pattern_id": pid,
-            "route": _route_ref(pattern.route),
+            "route": route_ref,
+            "bus_types": [t for t, _ in types.most_common()],
             "towards": ctx.stops[-1].name,      # last stop of this bus: what to look for
             "headsign": pattern.headsign or None,  # raw GTFS text, may not match "towards"
             "board": _stop_ref(board, walk_o),

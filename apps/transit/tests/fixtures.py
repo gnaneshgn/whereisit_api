@@ -59,7 +59,8 @@ def write_network(directory: Path):
     ])
     _write(directory, "trips", ["route_id", "service_id", "trip_id", "trip_short_name", "trip_headsign", "shape_id", "trip_type"], [
         ["a009-stop-1-stop-4", "daily", "T_EAST", "1", "Stop 4", "SH_E", "City Ordinary"],
-        ["a009-stop-1-stop-4", "daily", "T_EAST2", "2", "Stop 4", "SH_E", "City Ordinary"],
+        # Same route, same stops, different bus type: trip_type is per trip (like real route VZ13)
+        ["a009-stop-1-stop-4", "daily", "T_EAST2", "2", "Stop 4", "SH_E", "Metro Express"],
         # Misleading headsign on purpose (as ~24% of the real feed): must never become the destination
         ["a009-stop-1-stop-4", "daily", "T_WEST", "3", "Far Town", "SH_W", "City Ordinary"],
         ["x100-stop-1-stop-3", "daily", "T_NOSHAPE", "4", "Stop 3", "MISSING", "Express"],

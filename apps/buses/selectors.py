@@ -9,7 +9,7 @@ from common.utilities import normalize_registration, utc_now
 
 LIST_FIELDS = (
     "id", "vehicle_id", "registration_number", "trip_id", "route_id", "route_number", "route_name",
-    "start_point", "destination", "progress",
+    "start_point", "destination", "bus_type", "progress",
     "latitude", "longitude", "bearing", "speed", "gps_timestamp", "is_superseded", "last_synced_at",
     "trip_start_date",
 )

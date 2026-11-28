@@ -38,7 +38,7 @@ class LiveBusSerializer(serializers.ModelSerializer):
         model = LiveBus
         fields = [
             "vehicle_id", "registration_number", "route_id", "route_number", "route_name", "trip_id",
-            "start_point", "destination",
+            "start_point", "destination", "bus_type",
             "latitude", "longitude", "bearing", "speed", "speed_kmh",
             "gps_timestamp", "gps_age_seconds", "gps_status",
             "current_stop", "next_stop", "last_stop", "current_location", "trip_progress",

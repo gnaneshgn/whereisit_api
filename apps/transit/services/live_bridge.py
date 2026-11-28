@@ -51,6 +51,7 @@ def enrich_vehicles(vehicles, *, previous_progress: dict, trip_updates: dict, no
             "route_name": route.long_name or None,
             "start_point": None,
             "destination": None,
+            "bus_type": None,
             "progress": None,
         }
         if ctx is not None:
@@ -59,6 +60,8 @@ def enrich_vehicles(vehicles, *, previous_progress: dict, trip_updates: dict, no
             # "Tagarapuvalasa"), which would send riders the wrong way.
             info["start_point"] = ctx.stops[0].name
             info["destination"] = ctx.stops[-1].name
+            # trip_type of this exact trip; the route-level type is only the most common one
+            info["bus_type"] = ctx.trip.bus_type or None
             status = feed_status_service.classify_gps_status(v.gps_timestamp, now)
             if v.latitude is not None and status in PROGRESS_STATUSES:
                 prev = previous_progress.get(v.vehicle_id) or {}

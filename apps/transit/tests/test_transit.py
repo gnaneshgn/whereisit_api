@@ -164,6 +164,10 @@ class LiveApiTests(GtfsTestCase):
         self.assertEqual(east["next_stop"]["eta_source"], "realtime")
         self.assertEqual(east["current_location"], "Between Stop 1 and Stop 2")
         self.assertEqual(east["trip_progress"]["status"], "in_transit")
+        # bus_type comes from each bus's own trip, not the route
+        self.assertEqual(east["bus_type"], "City Ordinary")
+        self.assertEqual(buses["V_OFF"]["bus_type"], "Metro Express")  # T_EAST2, same route
+        self.assertIsNone(buses["V_NOGTFS"]["bus_type"])
         west = buses["V_WEST"]
         self.assertEqual(west["next_stop"]["stop_id"], "S2")
         # Destination is the trip's real last stop, not its (misleading) headsign "Far Town"
@@ -236,6 +240,9 @@ class LiveApiTests(GtfsTestCase):
         self.assertEqual(live[0]["stops_away"], 0)
         self.assertAlmostEqual(live[0]["distance_to_board_km"], 0.5, delta=0.01)
         self.assertEqual(live[0]["eta_source"], "realtime")
+        self.assertEqual(live[0]["bus_type"], "City Ordinary")
+        # Eastbound pattern carries both trip types; route bus_type = most common on this pattern
+        self.assertEqual(set(option["bus_types"]), {"City Ordinary", "Metro Express"})
         self.assertIsNotNone(live[0]["eta_at_alight"])
         self.assertGreaterEqual(len(option["path"]), 2)
         self.assertIsInstance(option["next_scheduled"], list)

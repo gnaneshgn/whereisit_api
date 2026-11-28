@@ -37,6 +37,9 @@ class LiveBus(models.Model):
     route_number = models.CharField(max_length=32, null=True, blank=True, db_index=True)
     route_name = models.CharField(max_length=255, null=True, blank=True)
     start_point = models.CharField(max_length=255, null=True, blank=True)
+    # GTFS trip_type of THIS bus's trip (e.g. "Metro Express", "City Ordinary"). Per trip, not per
+    # route: one route can mix types (VZ13 runs both Metro Express and City Ordinary trips).
+    bus_type = models.CharField(max_length=64, null=True, blank=True, db_index=True)
     destination = models.CharField(max_length=255, null=True, blank=True)
     progress = models.JSONField(
         null=True, blank=True,

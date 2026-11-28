@@ -32,7 +32,7 @@ KEY_DATA_VERSION = "feed:vehicle_positions:version"
 
 UPSERT_FIELDS = [
     "registration_number", "trip_id", "route_id", "trip_start_date", "route_number", "route_name",
-    "start_point", "destination", "progress",
+    "start_point", "destination", "bus_type", "progress",
     "latitude", "longitude", "bearing", "speed", "gps_timestamp", "gps_status", "is_superseded",
     "last_synced_at", "raw_data",
 ]
@@ -112,6 +112,7 @@ def persist_snapshot(snapshot, now) -> int:
             route_name=enriched.get(v.vehicle_id, empty).get("route_name"),
             start_point=enriched.get(v.vehicle_id, empty).get("start_point"),
             destination=enriched.get(v.vehicle_id, empty).get("destination"),
+            bus_type=enriched.get(v.vehicle_id, empty).get("bus_type"),
             progress=enriched.get(v.vehicle_id, empty).get("progress"),
             latitude=v.latitude,
             longitude=v.longitude,

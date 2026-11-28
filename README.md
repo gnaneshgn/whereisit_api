@@ -275,6 +275,7 @@ Bus fields from GTFS (all `null` when unknown):
 |---|---|
 | `route_number`, `route_name` | APSRTC route code and name |
 | `start_point`, `destination` | First and last stop of the bus's trip |
+| `bus_type` | GTFS `trip_type` of **this bus's trip** (`City Ordinary`, `Metro Express`, `Metro Luxury A/C`, `Ultra Deluxe`, …). Comes from the trip, not the route, because one route can mix types (VZ13) |
 | `last_stop`, `current_stop`, `next_stop` | `{stop_id, stop_name, stop_sequence}`. `next_stop` adds `distance_m`, `expected_arrival` and `eta_source`. `current_stop` is set only when the bus is within 60 m |
 | `current_location` | `"At X"`, or `"Between X and Y"` |
 | `trip_progress` | `{status: in_transit\|at_stop\|not_started\|completed\|off_route, progress_pct, stops_remaining, distance_along_m, route_length_m, path_approximate, as_of}` |
