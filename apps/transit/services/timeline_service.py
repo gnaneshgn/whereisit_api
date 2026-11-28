@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from apps.buses.services import bus_matching_service
+from apps.transit.route_numbers import display_for
 from apps.transit.services import trip_context
 from apps.transit.services.progress_service import stop_timeline
 
@@ -15,7 +16,7 @@ def route_block(ctx) -> dict:
     route = ctx.route
     return {
         "route_id": route.route_id,
-        "route_number": route.short_name or None,
+        "route_number": display_for(route),
         "route_name": route.long_name or None,
         "service_type": route.service_type,
         "bus_type": ctx.trip.bus_type or route.bus_type or None,

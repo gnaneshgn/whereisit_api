@@ -1,6 +1,8 @@
 import time
 from datetime import timedelta
 
+from django.test import override_settings
+
 from apps.buses.services import sync_service
 from apps.buses.tests.factories import FakeResponse, FeedTestCase, feed, patch_http, vehicle_entity
 from apps.transit.models import Pattern, PatternStop, Trip
@@ -341,6 +343,38 @@ class LiveApiTests(GtfsTestCase):
         gtfs = self.client.get("/api/feed/status/").json()["gtfs"]
         self.assertEqual((gtfs["routes"], gtfs["trips"], gtfs["version"]), (2, 4, "test-1"))
         self.assertEqual(gtfs["buses_with_progress"], 3)  # V_EAST, V_WEST, V_OFF (off_route)
+
+
+@override_settings(LOCAL_ROUTE_NUMBERS={"A009": "28A", "X100": "99"})
+class LocalRouteNumberTests(GtfsTestCase):
+    """Schedule codes are shown as the numbers riders know (B011 -> 6A), city routes only."""
+
+    def setUp(self):
+        super().setUp()
+        ts = int(time.time())
+        vehicles = [vehicle_entity("V_EAST", "AP31Z0001", "T_EAST", ROUTE, lat=LAT, lon=lon_at(0.5), ts=ts - 10, speed=8.0)]
+        patcher, _ = patch_http({
+            "trip_updates": FakeResponse(200, feed([], ts)),
+            "vehicle_positions": FakeResponse(200, feed(vehicles, ts)),
+        })
+        with patcher:
+            sync_service.sync_vehicle_positions()
+
+    def test_public_number_shown_and_searchable(self):
+        bus = self.client.get("/api/buses/live/").json()["results"][0]
+        self.assertEqual(bus["route_number"], "28A")
+        ids = lambda q: {b["vehicle_id"] for b in self.client.get("/api/buses/search/", {"q": q}).json()["results"]}
+        self.assertIn("V_EAST", ids("28a"))
+        self.assertIn("V_EAST", ids("A009"))  # schedule code still works
+
+        found = self.client.get("/api/routes/search/", {"q": "28A"}).json()["results"]
+        self.assertEqual([(r["route_number"], r["route_code"]) for r in found], [("28A", "A009")])
+        # Intercity routes keep their code: the same code means a different bus elsewhere
+        self.assertEqual(self.client.get("/api/routes/search/", {"q": "99"}).json()["count"], 0)
+        stop = self.client.get("/api/stops/search/", {"q": "stop 3"}).json()["results"][0]
+        self.assertEqual({r["route_number"] for r in stop["routes"]}, {"28A", "X100"})
+        detail = self.client.get(f"/api/buses/V_EAST/").json()["result"]
+        self.assertEqual(detail["route_number"], "28A")
 
 
 class DownloadTests(FeedTestCase):

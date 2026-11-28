@@ -3,13 +3,15 @@ from rest_framework import serializers
 
 from apps.buses.services import location_service
 from apps.transit.models import Route, ServiceType
+from apps.transit.route_numbers import display_for
 
 
 def route_dict(route: Route, active_buses=None) -> dict:
     """Matches the mobile normalizer: route_number / route_name / start_stop_name / end_stop_name."""
     return {
         "route_id": route.route_id,
-        "route_number": route.short_name or None,
+        "route_number": display_for(route),
+        "route_code": route.short_name or None,
         "route_name": route.long_name or None,
         "start_stop_name": route.origin_name or None,
         "end_stop_name": route.destination_name or None,

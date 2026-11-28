@@ -248,6 +248,11 @@ SERVICE_AREA_BBOX = _parse_bbox(env_str("SERVICE_AREA_BBOX"))
 # GTFS static + trip progress (apps.transit)
 # ---------------------------------------------------------------------------
 GTFS_DIR = Path(env_str("GTFS_DIR") or BASE_DIR / "data" / "apsrtc")
+# Rider-facing bus numbers for APSRTC schedule codes (City services only; see apps/transit/route_numbers.py)
+LOCAL_ROUTE_NUMBERS = {
+    "B011": "6A",
+    "JN01": "38K",
+}
 TRANSIT = {
     # GPS further than this from the trip's road = off route (no stop is reported)
     "OFF_ROUTE_M": env_int("TRANSIT_OFF_ROUTE_M", 150),

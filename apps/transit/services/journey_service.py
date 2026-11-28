@@ -29,6 +29,7 @@ from django.conf import settings
 from apps.buses.models import LiveBus
 from apps.buses.services import bus_matching_service, feed_status_service, location_service
 from apps.transit.models import Pattern, PatternStop, Stop, Trip
+from apps.transit.route_numbers import display_for
 from apps.transit.services import trip_context
 from apps.transit.services.progress_service import estimate_arrivals
 from common.utilities import iso_utc, utc_now
@@ -71,7 +72,7 @@ def _stop_ref(info, walk_m=None):
 
 def _route_ref(route):
     return {
-        "route_id": route.route_id, "route_number": route.short_name or None, "route_name": route.long_name or None,
+        "route_id": route.route_id, "route_number": display_for(route), "route_name": route.long_name or None,
         "service_type": route.service_type, "bus_type": route.bus_type or None,
     }
 

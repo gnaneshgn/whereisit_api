@@ -12,6 +12,7 @@ import logging
 from apps.buses.models import GpsStatus
 from apps.buses.services import feed_status_service
 from apps.transit.models import Route
+from apps.transit.route_numbers import display_for
 from apps.transit.services import trip_context
 from apps.transit.services.progress_service import compute_progress
 
@@ -25,7 +26,7 @@ def _route_labels(route_ids) -> dict:
     ids = [r for r in set(route_ids) if r]
     for start in range(0, len(ids), 500):
         for route in Route.objects.filter(route_id__in=ids[start:start + 500]).only(
-            "route_id", "short_name", "long_name", "origin_name", "destination_name"
+            "route_id", "short_name", "long_name", "service_type", "origin_name", "destination_name"
         ):
             labels[route.route_id] = route
     return labels
@@ -47,7 +48,7 @@ def enrich_vehicles(vehicles, *, previous_progress: dict, trip_updates: dict, no
         if route is None:
             continue
         info = {
-            "route_number": route.short_name or None,
+            "route_number": display_for(route),
             "route_name": route.long_name or None,
             "start_point": None,
             "destination": None,

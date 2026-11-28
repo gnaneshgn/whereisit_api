@@ -7,6 +7,7 @@ from django.conf import settings
 from django.db.models import Q, QuerySet
 
 from apps.buses import selectors as bus_selectors
+from apps.transit import route_numbers
 from apps.transit.models import Pattern, PatternStop, Route, Stop
 from apps.transit.services import trip_context
 
@@ -27,18 +28,18 @@ def routes(*, query=None, service_type=None, bbox=None) -> QuerySet:
         text = query.strip()
         qs = qs.filter(
             Q(short_name__iexact=text) | Q(short_name__istartswith=text) | Q(long_name__icontains=text)
-            | Q(route_id__icontains=text)
+            | Q(route_id__icontains=text) | route_numbers.route_query(text)
         )
     return qs.order_by("short_name", "route_id")
 
 
 def route_search(query: str) -> QuerySet:
-    """Route code / name, or any route serving a stop whose name matches."""
+    """Route code / public number (6A) / name, or any route serving a stop whose name matches."""
     text = query.strip()
     stop_route_ids = PatternStop.objects.filter(stop__name__icontains=text).values("pattern__route_id")
     qs = _in_area(Route.objects.all(), settings.SERVICE_AREA_BBOX).filter(
         Q(short_name__iexact=text) | Q(short_name__istartswith=text) | Q(long_name__icontains=text)
-        | Q(route_id__in=stop_route_ids)
+        | Q(route_id__in=stop_route_ids) | route_numbers.route_query(text)
     )
     return qs.order_by("short_name", "route_id")
 
@@ -60,10 +61,14 @@ def stops_with_routes(stops) -> dict:
     ids = [s.stop_id for s in stops]
     out = defaultdict(dict)
     rows = PatternStop.objects.filter(stop_id__in=ids).values_list(
-        "stop_id", "pattern__route_id", "pattern__route__short_name", "pattern__route__long_name"
+        "stop_id", "pattern__route_id", "pattern__route__short_name", "pattern__route__long_name",
+        "pattern__route__service_type",
     ).distinct()
-    for sid, rid, short, long_name in rows:
-        out[sid][rid] = {"route_id": rid, "route_number": short or None, "route_name": long_name or None}
+    for sid, rid, short, long_name, service_type in rows:
+        out[sid][rid] = {
+            "route_id": rid, "route_number": route_numbers.display_number(short, service_type),
+            "route_name": long_name or None,
+        }
     return {sid: sorted(v.values(), key=lambda r: (r["route_number"] or "", r["route_id"])) for sid, v in out.items()}
 
 
