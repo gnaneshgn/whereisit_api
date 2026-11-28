@@ -16,6 +16,7 @@ urlpatterns = [
     # Stops
     path("stops/nearby/", views.NearbyStopsView.as_view(), name="stop-nearby"),
     path("stops/search/", views.StopSearchView.as_view(), name="stop-search"),
+    path("stops/buses/", views.StopBusesView.as_view(), name="stop-buses"),
     path("stops/<str:stop_id>/", views.StopDetailView.as_view(), name="stop-detail"),
     path("stops/<str:stop_id>/arrivals/", views.StopArrivalsView.as_view(), name="stop-arrivals"),
     # Trips, journeys, live bus timeline

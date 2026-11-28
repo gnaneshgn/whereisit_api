@@ -33,12 +33,13 @@ class LiveBusSerializer(serializers.ModelSerializer):
     last_stop = serializers.SerializerMethodField()
     current_location = serializers.SerializerMethodField()
     trip_progress = serializers.SerializerMethodField()
+    bus_category = serializers.SerializerMethodField()
 
     class Meta:
         model = LiveBus
         fields = [
             "vehicle_id", "registration_number", "route_id", "route_number", "route_name", "trip_id",
-            "start_point", "destination", "bus_type",
+            "start_point", "destination", "bus_type", "bus_category",
             "latitude", "longitude", "bearing", "speed", "speed_kmh",
             "gps_timestamp", "gps_age_seconds", "gps_status",
             "current_stop", "next_stop", "last_stop", "current_location", "trip_progress",
@@ -62,6 +63,10 @@ class LiveBusSerializer(serializers.ModelSerializer):
 
     def get_speed_kmh(self, obj):
         return round(obj.speed * MS_TO_KMH, 1) if obj.speed is not None else None
+
+    def get_bus_category(self, obj):
+        """metro | local | other, from this bus's own trip_type."""
+        return bus_matching_service.bus_category(obj.bus_type)
 
     def get_current_stop(self, obj):
         """The stop the bus is at (within TRANSIT.AT_STOP_M), else null."""

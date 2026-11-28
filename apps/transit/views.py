@@ -20,11 +20,12 @@ from apps.transit.serializers import (
     NearbyStopsQuerySerializer,
     RouteListQuerySerializer,
     RouteStopsQuerySerializer,
+    StopBusesQuerySerializer,
     TextQuerySerializer,
     route_dict,
     stop_dict,
 )
-from apps.transit.services import journey_service, timeline_service, trip_context
+from apps.transit.services import journey_service, stop_buses_service, timeline_service, trip_context
 from common.utilities import iso_utc, utc_now
 
 
@@ -170,6 +171,35 @@ def _stop_or_404(stop_id):
     if stop is None:
         raise NotFound(f"No stop '{stop_id}'.")
     return stop
+
+
+class StopBusesView(GtfsRequiredMixin, APIView):
+    """
+    GET /api/stops/buses/?q=Simhachalam            (every stop whose name contains q)
+    GET /api/stops/buses/?stop_id=13801&category=metro
+
+    Live buses whose trip starts at, ends at or passes through the stop(s), with
+    approaching / at_stop / passed status, stops away and ETA, grouped by
+    ``bus_category`` (metro | local | other). ``counts`` always covers all groups.
+    """
+
+    def get(self, request):
+        p = _valid(StopBusesQuerySerializer, request.query_params)
+        if p.get("stop_id"):
+            stops = list(Stop.objects.filter(stop_id=p["stop_id"]))
+            if not stops:
+                raise NotFound(f"No stop '{p['stop_id']}'.")
+        else:
+            stops = selectors.search_stops(p["q"])
+        now = utc_now()
+        data = stop_buses_service.buses_via_stops(stops, now=now, category=p.get("category"))
+        return Response({
+            "success": True, **feed_meta(now),
+            "stops": [stop_dict(s) for s in stops],
+            "counts": data["counts"],
+            "count": len(data["results"]),
+            "results": data["results"],
+        })
 
 
 class StopDetailView(GtfsRequiredMixin, APIView):

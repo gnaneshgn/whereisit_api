@@ -274,6 +274,36 @@ class LiveApiTests(GtfsTestCase):
         self.assertEqual([b["vehicle_id"] for b in body["results"]], ["V_EAST"])
         self.assertEqual(body["results"][0]["stops_away"], 1)
 
+    def test_buses_via_stop_relation_status_and_category(self):
+        body = self.client.get("/api/stops/buses/", {"q": "Stop 3"}).json()
+        self.assertEqual([s["stop_id"] for s in body["stops"]], ["S3"])
+        by_id = {b["vehicle_id"]: b for b in body["results"]}
+        # Every live bus whose trip serves S3; V_NOGTFS (no trip in GTFS) is not included
+        self.assertEqual(set(by_id), {"V_EAST", "V_WEST", "V_OFF", "V_OLD"})
+        east = by_id["V_EAST"]["via"]
+        self.assertEqual((east["relation"], east["status"], east["stops_away"]), ("passes", "approaching", 1))
+        self.assertAlmostEqual(east["distance_km"], 1.5, delta=0.01)
+        self.assertIsNotNone(east["eta"])
+        self.assertEqual(by_id["V_WEST"]["via"]["status"], "passed")    # westbound at 1.5 km, S3 is at 1 km on its trip
+        self.assertEqual(by_id["V_OFF"]["via"]["status"], "unknown")    # off route: never guessed
+        self.assertEqual(by_id["V_OLD"]["via"]["status"], "unknown")    # stale GPS
+        self.assertEqual(body["results"][0]["vehicle_id"], "V_EAST")    # approaching first
+        # Category from each bus's own trip_type
+        self.assertEqual(by_id["V_OFF"]["bus_category"], "metro")       # Metro Express
+        self.assertEqual(by_id["V_EAST"]["bus_category"], "local")      # City Ordinary
+        self.assertEqual(body["counts"], {"all": 4, "metro": 1, "local": 3, "other": 0})
+
+        metro = self.client.get("/api/stops/buses/", {"q": "Stop 3", "category": "metro"}).json()
+        self.assertEqual([b["vehicle_id"] for b in metro["results"]], ["V_OFF"])
+        self.assertEqual(metro["counts"]["all"], 4)  # counts always cover every group
+
+        ends = self.client.get("/api/stops/buses/", {"stop_id": "S1"}).json()
+        relations = {b["vehicle_id"]: b["via"]["relation"] for b in ends["results"]}
+        self.assertEqual(relations["V_EAST"], "starts")
+        self.assertEqual(relations["V_WEST"], "ends")
+        self.assertEqual(self.client.get("/api/stops/buses/").status_code, 400)
+        self.assertEqual(self.client.get("/api/stops/buses/", {"stop_id": "NOPE"}).status_code, 404)
+
     def test_nearby_and_search_stops(self):
         body = self.client.get("/api/stops/nearby/", {"latitude": STOP_LAT, "longitude": lon_at(1), "radius": 0.5}).json()
         self.assertEqual([s["stop_id"] for s in body["results"]], ["S2"])

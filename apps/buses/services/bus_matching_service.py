@@ -48,6 +48,22 @@ def find_superseded_ids(vehicles: list[NormalizedVehicle]) -> set[str]:
     return superseded
 
 
+class BusCategory:
+    METRO = "metro"   # trip_type contains "Metro" (Metro Express, Metro Luxury A/C)
+    LOCAL = "local"   # "City Ordinary": the normal city bus
+    OTHER = "other"   # everything else: intercity types (Express, Pallevelugu, Ultra Deluxe…) or unknown
+
+
+def bus_category(bus_type: str | None) -> str:
+    """Passenger-facing group for a GTFS trip_type. Unknown types are OTHER, never guessed as local."""
+    text = (bus_type or "").strip().lower()
+    if "metro" in text:
+        return BusCategory.METRO
+    if text == "city ordinary":
+        return BusCategory.LOCAL
+    return BusCategory.OTHER
+
+
 # ---------------------------------------------------------------------------
 # Trip updates (cached map keyed by vehicle id)
 # ---------------------------------------------------------------------------

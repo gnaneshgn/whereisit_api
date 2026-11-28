@@ -86,6 +86,19 @@ class JourneyQuerySerializer(serializers.Serializer):
         return attrs
 
 
+class StopBusesQuerySerializer(serializers.Serializer):
+    """Stop by exact id, or every stop whose name contains ``q`` (e.g. "Simhachalam")."""
+
+    q = serializers.CharField(required=False, min_length=2, max_length=64, trim_whitespace=True)
+    stop_id = serializers.CharField(required=False, max_length=64)
+    category = serializers.ChoiceField(required=False, choices=["metro", "local", "other"])
+
+    def validate(self, attrs):
+        if not attrs.get("q") and not attrs.get("stop_id"):
+            raise serializers.ValidationError({"q": ["Give q (stop name) or stop_id."]})
+        return attrs
+
+
 class BusTripQuerySerializer(serializers.Serializer):
     from_stop = serializers.CharField(required=False, max_length=64)
     to_stop = serializers.CharField(required=False, max_length=64)
